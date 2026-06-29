@@ -1,0 +1,63 @@
+---
+- name: Rotate and validate demo-user IAM key sync
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    iam_user: demo-user
+    aws_secret_name: /iam/rotated-keys/demo-user
+    ocp_namespace: demo-user-test
+    ocp_secret: demo-user-aws-creds
+    pod_name: demo-user-test-pod
+
+  tasks:
+    - name: Trigger Lambda rotation
+      command: >
+        aws lambda invoke
+        --function-name iam-key-rotation-prod
+        --payload '{}'
+        /tmp/lambda-output.json
+
+    - name: Get AWS secret value
+      command: >
+        aws secretsmanager get-secret-value
+        --secret-id {{ aws_secret_name }}
+        --query SecretString
+        --output text
+      register: aws_secret_value
+
+    - name: Show AWS secret exists
+      debug:
+        msg: "AWS Secrets Manager secret found for {{ iam_user }}"
+
+    - name: Wait for ESO sync
+      command: >
+        oc get externalsecret demo-user-aws-creds-sync
+        -n {{ ocp_namespace }}
+      register: eso_status
+      retries: 10
+      delay: 30
+      until: eso_status.rc == 0
+
+    - name: Get OpenShift synced access key
+      shell: >
+        oc get secret {{ ocp_secret }} -n {{ ocp_namespace }}
+        -o jsonpath='{.data.aws_access_key_id}' | base64 -d
+      register: ocp_access_key
+
+    - name: Show synced OCP access key
+      debug:
+        msg: "OCP secret has synced access key: {{ ocp_access_key.stdout }}"
+
+    - name: Restart test pod
+      command: oc delete pod {{ pod_name }} -n {{ ocp_namespace }}
+      ignore_errors: true
+
+    - name: Wait for pod to come back
+      command: >
+        oc get pod {{ pod_name }} -n {{ ocp_namespace }}
+      register: pod_check
+      retries: 10
+      delay: 15
+      until: pod_check.rc == 0
+      ignore_errors: true
