@@ -9,26 +9,18 @@
     ocp_namespace: demo-user-test
     ocp_secret: demo-user-aws-creds
     pod_name: demo-user-test-pod
+    lambda_function_name: key-rotation-for-demo-user
 
   tasks:
     - name: Trigger Lambda rotation
-      command: >
-        aws lambda invoke
-        --function-name key-rotation-for-demo-user
-        --payload '{}'
-        /tmp/lambda-output.json
+      amazon.aws.lambda_execute:
+        name: "{{ lambda_function_name }}"
+        payload: {}
+      register: lambda_result
 
-    - name: Get AWS secret value
-      command: >
-        aws secretsmanager get-secret-value
-        --secret-id {{ aws_secret_name }}
-        --query SecretString
-        --output text
-      register: aws_secret_value
-
-    - name: Show AWS secret exists
+    - name: Show Lambda result
       debug:
-        msg: "AWS Secrets Manager secret found for {{ iam_user }}"
+        var: lambda_result
 
     - name: Wait for ESO sync
       command: >
@@ -53,11 +45,24 @@
       command: oc delete pod {{ pod_name }} -n {{ ocp_namespace }}
       ignore_errors: true
 
-    - name: Wait for pod to come back
+    - name: Recreate test pod
+      command: oc apply -f demo-user-test-pod.yaml
+
+    - name: Wait for pod to be Running
       command: >
         oc get pod {{ pod_name }} -n {{ ocp_namespace }}
-      register: pod_check
-      retries: 10
-      delay: 15
-      until: pod_check.rc == 0
-      ignore_errors: true
+        -o jsonpath='{.status.phase}'
+      register: pod_phase
+      retries: 20
+      delay: 10
+      until: pod_phase.stdout == "Running"
+
+    - name: Validate pod sees synced AWS key
+      shell: >
+        oc exec -n {{ ocp_namespace }} {{ pod_name }} --
+        printenv AWS_ACCESS_KEY_ID
+      register: pod_access_key
+
+    - name: Show pod access key
+      debug:
+        msg: "Pod is using AWS access key: {{ pod_access_key.stdout }}"
