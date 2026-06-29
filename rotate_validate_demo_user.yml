@@ -10,11 +10,13 @@
     ocp_secret: demo-user-aws-creds
     pod_name: demo-user-test-pod
     lambda_function_name: key-rotation-for-demo-user
+    aws_region: us-east-1
 
   tasks:
     - name: Trigger Lambda rotation
       amazon.aws.lambda_execute:
         name: "{{ lambda_function_name }}"
+        region: "{{ aws_region }}"
         payload: {}
       register: lambda_result
 
