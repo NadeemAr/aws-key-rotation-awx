@@ -14,7 +14,7 @@
     - name: Trigger Lambda rotation
       command: >
         aws lambda invoke
-        --function-name iam-key-rotation-prod
+        --function-name key-rotation-for-demo-user
         --payload '{}'
         /tmp/lambda-output.json
 
